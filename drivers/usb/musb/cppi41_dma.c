@@ -1385,11 +1385,13 @@ void txdma_completion_work(struct work_struct *data)
 					tx_ch->channel.status =
 							MUSB_DMA_STATUS_FREE;
 					tx_ch->tx_complete = 0;
+					spin_lock_irqsave(&musb->lock, flags);
 					musb_dma_completion(musb, index+1, 1);
+					spin_unlock_irqrestore(&musb->lock,
+							flags);
 				}
 			}
 		}
-		spin_unlock_irqrestore(&musb->lock, flags);
 
 		if (resched) {
 			resched = 0;
