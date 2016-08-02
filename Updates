@@ -30,3 +30,12 @@ use the source code of epautoconf.c file to replace #include "epautoconf.c" in t
 make the usb_ep_autoconfig into 2usb_ep_autoconfig2 ,
      the usb_ep_autoconfig_reset into usb_ep_autoconfig_reset2 ,
      the usb_ep_autoconfig_ss into usb_ep_autoconfig_ss2
+
+6 使能spi
+add gpio3_18,gpio3_19,gpio3_20 in the arch/arm/mach-omap2/mux33xx.c
+add w25q32 flash drivers spi-w25q32.c
+modify Makefile :obj-$(CONFIG_SPI_W25Q32)		+= spi-w25q32.o
+modify Kconfig :config SPI_W25Q32
+make menuconfig
+   User mode SPI device driver support   
+   w25q32bv SPI flash driver

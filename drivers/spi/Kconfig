@@ -429,6 +429,11 @@ config SPI_TLE62X0
 #
 # Add new SPI protocol masters in alphabetical order above this line
 #
+config SPI_W25Q32
+	tristate "w25q32bv SPI flash driver"
+	help
+	  This supports Host  SPI protocol flash drivers.
+
 
 endif # SPI_MASTER
 
