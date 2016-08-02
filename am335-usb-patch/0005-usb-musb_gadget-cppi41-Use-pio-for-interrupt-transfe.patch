@@ -1,0 +1,39 @@
+From 0112658400b632651732a5f0f7b5336ac51aa2b5 Mon Sep 17 00:00:00 2001
+From: Ajay Kumar Gupta <ajay.gupta@ti.com>
+Date: Thu, 12 Jan 2012 16:51:23 +0530
+Subject: [PATCH 05/11] usb: musb_gadget: cppi41: Use pio for interrupt
+ transfer
+
+Use pio mode for interrupt transfer of size <= 64 byte. We have seen
+TxFiFoEmpty workqueue going into infinite loop when a CDC device is
+connected to another EVM
+---
+ drivers/usb/musb/musb_gadget.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/musb/musb_gadget.c b/drivers/usb/musb/musb_gadget.c
+index 9be3b69..a5fc567 100644
+--- a/drivers/usb/musb/musb_gadget.c
++++ b/drivers/usb/musb/musb_gadget.c
+@@ -449,9 +449,16 @@ static void txstate(struct musb *musb, struct musb_request *req)
+ 			 * short case.
+ 			 */
+ 			/* for zero byte transfer use pio mode */
+-			if (request_size == 0)
++
++			/* Use pio mode for interrupt transfer of size <= 64
++			 * byte. We have seen TxFiFoEmpty workqueue going into
++			 * infinite loop when a CDC device is connected to
++			 * another EVM. */
++
++			if ((request_size == 0) || (request_size <= 64 &&
++				musb_ep->type == USB_ENDPOINT_XFER_INT)) {
+ 				use_dma = 0;
+-			else {
++			} else {
+ 				use_dma = use_dma && c->channel_program(
+ 					musb_ep->dma, musb_ep->packet_sz,
+ 					0,
+-- 
+2.5.5
+

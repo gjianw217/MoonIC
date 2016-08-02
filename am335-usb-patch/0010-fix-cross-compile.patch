@@ -1,0 +1,25 @@
+From c2b5cd76549e8f372f07902e563f23aa5bc7d8a1 Mon Sep 17 00:00:00 2001
+From: ayaka <ayaka@soulik.info>
+Date: Mon, 2 May 2016 15:16:21 +0800
+Subject: [PATCH 10/11] fix cross compile
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 3b57984..5a9c586 100644
+--- a/Makefile
++++ b/Makefile
+@@ -193,7 +193,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
+ # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
+ export KBUILD_BUILDHOST := $(SUBARCH)
+ ARCH		?= arm
+-CROSS_COMPILE	?= arm-none-linux-gnueabi-
++CROSS_COMPILE	?= arm-am3358-linux-gnueabihf-
+ 
+ # Architecture as present in compile.h
+ UTS_MACHINE 	:= $(ARCH)
+-- 
+2.5.5
+

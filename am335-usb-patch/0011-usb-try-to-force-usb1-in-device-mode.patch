@@ -1,0 +1,25 @@
+From 36712fd1c7be451e370d5422f3d14cf21369a73a Mon Sep 17 00:00:00 2001
+From: ayaka <ayaka@soulik.info>
+Date: Mon, 2 May 2016 15:17:23 +0800
+Subject: [PATCH 11/11] usb: try to force usb1 in device mode
+
+---
+ arch/arm/mach-omap2/board-am335xevm.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/mach-omap2/board-am335xevm.c b/arch/arm/mach-omap2/board-am335xevm.c
+index 92acb6d..564b79b 100644
+--- a/arch/arm/mach-omap2/board-am335xevm.c
++++ b/arch/arm/mach-omap2/board-am335xevm.c
+@@ -1917,7 +1917,7 @@ static struct omap_musb_board_data musb_board_data = {
+ 	 * mode[4:7] = USB1PORT's mode
+ 	 * AM335X beta EVM has USB0 in OTG mode and USB1 in host mode.
+ 	 */
+-	.mode           = (MUSB_HOST << 4) | MUSB_OTG,
++	.mode           = (MUSB_PERIPHERAL << 4) | MUSB_OTG,
+ 	.power		= 500,
+ 	.instances	= 1,
+ };
+-- 
+2.5.5
+

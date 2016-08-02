@@ -1,0 +1,83 @@
+From 9037e1a2379a69531d10ddd1c19cac0c8bb3997a Mon Sep 17 00:00:00 2001
+From: Ajay Kumar Gupta <ajay.gupta@ti.com>
+Date: Thu, 22 Dec 2011 12:11:47 +0530
+Subject: [PATCH 03/11] usb: musb: ti81xx: allow board file to set usb mode for
+ each port
+
+Used existing .mode field of board_data for setting usb mode for both
+usb ports. usb0 mode is taken from board_mode[0:3] and usb1 mode is
+from board_mode[4:7] bits. As mode can take values only from 0 to 3
+so this is safe.
+
+This board mode is later used and corretly set in each port's musb
+platform_data's mode.
+
+Signed-off-by: Ajay Kumar Gupta <ajay.gupta@ti.com>
+---
+ arch/arm/mach-omap2/board-am335xevm.c |  7 ++++++-
+ drivers/usb/musb/ti81xx.c             | 10 ++++++++++
+ drivers/usb/musb/ti81xx.h             |  3 +++
+ 3 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/mach-omap2/board-am335xevm.c b/arch/arm/mach-omap2/board-am335xevm.c
+index 69bea38..92acb6d 100644
+--- a/arch/arm/mach-omap2/board-am335xevm.c
++++ b/arch/arm/mach-omap2/board-am335xevm.c
+@@ -1912,7 +1912,12 @@ static struct i2c_board_info __initdata am335x_i2c_boardinfo[] = {
+ 
+ static struct omap_musb_board_data musb_board_data = {
+ 	.interface_type	= MUSB_INTERFACE_ULPI,
+-	.mode           = MUSB_OTG,
++	/*
++	 * mode[0:3] = USB0PORT's mode
++	 * mode[4:7] = USB1PORT's mode
++	 * AM335X beta EVM has USB0 in OTG mode and USB1 in host mode.
++	 */
++	.mode           = (MUSB_HOST << 4) | MUSB_OTG,
+ 	.power		= 500,
+ 	.instances	= 1,
+ };
+diff --git a/drivers/usb/musb/ti81xx.c b/drivers/usb/musb/ti81xx.c
+index 760aa9e..2feb0da 100644
+--- a/drivers/usb/musb/ti81xx.c
++++ b/drivers/usb/musb/ti81xx.c
+@@ -1157,6 +1157,7 @@ static int __devinit ti81xx_create_musb_pdev(struct ti81xx_glue *glue, u8 id)
+ 	struct device *dev = glue->dev;
+ 	struct platform_device *pdev = to_platform_device(dev);
+ 	struct musb_hdrc_platform_data  *pdata = dev->platform_data;
++	struct omap_musb_board_data *bdata = pdata->board_data;
+ 	struct platform_device	*musb;
+ 	struct resource *res;
+ 	struct resource	resources[2];
+@@ -1207,6 +1208,15 @@ static int __devinit ti81xx_create_musb_pdev(struct ti81xx_glue *glue, u8 id)
+ 		goto err1;
+ 	}
+ 
++	if (id == 0)
++		pdata->mode = bdata->mode & USB0PORT_MODEMASK;
++	else
++		pdata->mode = (bdata->mode & USB1PORT_MODEMASK)
++					>> USB1PORT_MODESHIFT;
++
++	dev_info(dev, "musb%d, board_mode=0x%x, plat_mode=0x%x\n",
++					id, bdata->mode, pdata->mode);
++
+ 	ret = platform_device_add_data(musb, pdata, sizeof(*pdata));
+ 	if (ret) {
+ 		dev_err(dev, "failed to add platform_data\n");
+diff --git a/drivers/usb/musb/ti81xx.h b/drivers/usb/musb/ti81xx.h
+index 95423bf..fe1caf9 100644
+--- a/drivers/usb/musb/ti81xx.h
++++ b/drivers/usb/musb/ti81xx.h
+@@ -165,5 +165,8 @@
+ #define	USBMODE_USBID_MUXSEL	0x80
+ #define	USBMODE_USBID_HIGH	0x100
+ 
++#define	USB0PORT_MODEMASK	0x0f
++#define	USB1PORT_MODEMASK	0xf0
++#define USB1PORT_MODESHIFT	4
+ extern void usb_nop_xceiv_register(int id);
+ #endif
+-- 
+2.5.5
+
