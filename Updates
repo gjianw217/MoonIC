@@ -1,14 +1,32 @@
 1 上传源码 linux-3.1.0-psp04.06.00.03.sdk
 The devkit8600 Linux source code,which is the linux-3.1.0-psp04.06.00.03.sdk
  git tag v0.1
+
 2 打补丁 am335-usb-patch
+Puting a patch for the Linux Usb to work very well.
+
 git am am335-usb-patch/000
 git gc
-Puting a patch for the Linux Usb to work very well.
- git tag v0.2
+git tag v0.2
+
 3 配置编译
+Compile the source code success（make uImage）
+
 make distclean
 make devkit8600_defconfig
 make menuconfig
 make uImage
 add custom linux/gpio_flash.h
+add custom the arch/arm/mach-omap2/board-am335xevm.c
+
+4 使能USB
+Enable the USB1 to work at full speed mode
+ bind builtin gadget USB-1 to make menuconfig
+ comment out the MUSB_POWER_HSENAB on the musb_start function in the drivers/usb/musb/msub_core.c
+
+5 使能g_zero
+Enable the g_zero firmware to communication with PC which uses the usb-sketeton.c in the linux OS
+use the source code of epautoconf.c file to replace #include "epautoconf.c" in the drivers/usb/gadget/dbgp.c
+make the usb_ep_autoconfig into 2usb_ep_autoconfig2 ,
+     the usb_ep_autoconfig_reset into usb_ep_autoconfig_reset2 ,
+     the usb_ep_autoconfig_ss into usb_ep_autoconfig_ss2
