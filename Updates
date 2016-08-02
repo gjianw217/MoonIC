@@ -1,0 +1,14 @@
+1 上传源码 linux-3.1.0-psp04.06.00.03.sdk
+The devkit8600 Linux source code,which is the linux-3.1.0-psp04.06.00.03.sdk
+ git tag v0.1
+2 打补丁 am335-usb-patch
+git am am335-usb-patch/000
+git gc
+Puting a patch for the Linux Usb to work very well.
+ git tag v0.2
+3 配置编译
+make distclean
+make devkit8600_defconfig
+make menuconfig
+make uImage
+add custom linux/gpio_flash.h

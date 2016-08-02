@@ -58,8 +58,7 @@
 #include "mux.h"
 #include "devices.h"
 #include "hsmmc.h"
-#include <linux/spi/spi_gpio.h>
-#include <linux/gpio_flash.h>
+
 /* TLK PHY IDs */
 #define TLK110_PHY_ID		0x2000A201
 #define TLK110_PHY_MASK		0xfffffff0
@@ -466,7 +465,18 @@ static struct pinmux_config nand_pin_mux[] = {
 	{NULL, 0},
 };
 
-
+/* Module pin mux for SPI fash */
+static struct pinmux_config spi0_pin_mux[] = {
+	{"spi0_sclk.spi0_sclk", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
+							| AM33XX_INPUT_EN},
+	{"spi0_d0.spi0_d0", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
+							| AM33XX_INPUT_EN},
+	{"spi0_d1.spi0_d1", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
+							| AM33XX_INPUT_EN},
+	{"spi0_cs0.spi0_cs0", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
+							| AM33XX_INPUT_EN},
+	{NULL, 0},
+};
 
 #if 0
 /* Module pin mux for SPI flash */
@@ -745,8 +755,6 @@ static void matrix_keypad_init(int evm_id, int profile)
 static struct pinmux_config gpio_led_pin_mux[] = {
         {"gpmc_a10.gpio1_26",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
         {"gpmc_a11.gpio1_27",    OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},
-        {"mcasp0_aclkr.gpio3_18", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},//nConfig
-        {"mcasp0_fsr.gpio3_19",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},//nCE
         {NULL, 0},
 };
 
@@ -763,25 +771,11 @@ static struct gpio_led gpio_leds[] = {
                 .name                   = "sys_led",
                 .default_trigger        = "heartbeat",
                 .gpio                   = GPIO_TO_PIN(1, 26),
-
         },
         {
                 .name                   = "user_led",
                 .gpio                   = GPIO_TO_PIN(1, 27),
-
         },
-        {
-                .name                   = "moonic_led1",
-                .gpio                   = GPIO_TO_PIN(3, 18),
-
-        },
-        {
-                .name                   = "moonic_led2",
-                .gpio                   = GPIO_TO_PIN(3, 19),
-
-        },
-
-
 };
 
 static struct gpio_led_platform_data gpio_led_info = {
@@ -801,7 +795,7 @@ static void gpio_led_init(int evm_id, int profile)
 {
         int err;
 
-    printk("XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXgpio_led_init\n");
+	pr_dbg("--------gpio_led_init\n");
 
         setup_pin_mux(gpio_led_pin_mux);
         err = platform_device_register(&leds_gpio);
@@ -920,7 +914,7 @@ static struct pinmux_config usb1_pin_mux[] = {
 static struct pinmux_config profibus_pin_mux[] = {
 	{"uart1_rxd.pr1_uart0_rxd_mux1", OMAP_MUX_MODE5 | AM33XX_PIN_INPUT},
 	{"uart1_txd.pr1_uart0_txd_mux1", OMAP_MUX_MODE5 | AM33XX_PIN_OUTPUT},
-	//{"mcasp0_fsr.pr1_pru0_pru_r30_5", OMAP_MUX_MODE5 | AM33XX_PIN_OUTPUT},
+	{"mcasp0_fsr.pr1_pru0_pru_r30_5", OMAP_MUX_MODE5 | AM33XX_PIN_OUTPUT},
 	{NULL, 0},
 };
 #endif
@@ -1160,7 +1154,6 @@ static void usb0_init(int evm_id, int profile)
 	pr_dbg("--------usb0_init\n");
 
 	setup_pin_mux(usb0_pin_mux);
-	printk("----------------------------enter usb0_init\n");
 	return;
 }
 
@@ -1269,35 +1262,15 @@ static const struct flash_platform_data am335x_spi_flash = {
  * SPI Flash works at 80Mhz however SPI Controller works at 48MHz.
  * So setup Max speed to be less than that of Controller speed
  */
-
-static struct spi_board_info am335x_spi0_slave_info_keshan[] = {
+static struct spi_board_info am335x_spi0_slave_info[] = {
 	{
-		.modalias      = "spidev",
-		//.platform_data = &am335x_spi_flash,
+		.modalias      = "m25p80",
+		.platform_data = &am335x_spi_flash,
 		.irq           = -1,
-		.max_speed_hz  = 10000000,
+		.max_speed_hz  = 24000000,
 		.bus_num       = 1,
 		.chip_select   = 0,
-		.mode	       = SPI_MODE_3,
-	},/*
-	{
-		.modalias      = "at26df321",
-		//.platform_data = &am335x_spi_flash,
-		.irq           = -1,
-		.max_speed_hz  = 10000000,
-		.bus_num       = 1,
-		.chip_select   = 0,
-		.mode	       = SPI_MODE_0,
 	},
-	{
-		.modalias      = "spitest1",
-		//.platform_data = &am335x_spi_flash,
-		.irq           = -1,
-		.max_speed_hz  = 10*1000*1000,
-		.bus_num       = 1,
-		.chip_select   = 0,
-		.mode	       = SPI_MODE_3,
-	},*/
 };
 
 static struct spi_board_info am335x_spi1_slave_info[] = {
@@ -1509,14 +1482,14 @@ static void wl12xx_init(int evm_id, int profile)
 		pr_err("Error requesting wlan enable gpio: %d\n", ret);
 		goto out;
 	}
-
+	
 #if 0
 	if (gp_evm_revision == GP_EVM_REV_IS_1_1A)
 		setup_pin_mux(wl12xx_pin_mux_evm_rev1_1a);
 	else
 		setup_pin_mux(wl12xx_pin_mux_evm_rev1_0);
 #endif
-
+	
 	pdata->slots[0].set_power = wl12xx_set_power;
 out:
 	return;
@@ -1535,7 +1508,7 @@ static void mmc0_init(int evm_id, int profile)
 {
 	setup_pin_mux(mmc0_pin_mux);
 
-	//omap2_hsmmc_init(am335x_mmc); used the gpio3_19 to the cd function
+	omap2_hsmmc_init(am335x_mmc);
 	return;
 }
 
@@ -1548,23 +1521,14 @@ static void mmc0_no_cd_init(int evm_id, int profile)
 }
 
 
-#if 0
 /* setup spi0 */
-
 static void spi0_init(int evm_id, int profile)
 {
 	setup_pin_mux(spi0_pin_mux);
 	spi_register_board_info(am335x_spi0_slave_info,
 			ARRAY_SIZE(am335x_spi0_slave_info));
-	printk("----------------------------enter spi0_init\n");
 	return;
 }
-
-#endif
-
-
-
-
 
 #if 0
 /* setup spi1 */
@@ -1577,193 +1541,6 @@ static void spi1_init(int evm_id, int profile)
 }
 #endif
 
-/**************************************************/
-
-/// Module pin mux for SPI fash
-static struct pinmux_config spi0_pin_mux[] = {
-	{"spi0_sclk.spi0_sclk", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
-							| AM33XX_INPUT_EN},
-	{"spi0_d0.spi0_d0", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
-							| AM33XX_INPUT_EN},
-	{"spi0_d1.spi0_d1", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL
-							| AM33XX_INPUT_EN},
-	{"spi0_cs0.spi0_cs0", OMAP_MUX_MODE0 | AM33XX_PULL_ENBL | AM33XX_PULL_UP
-							| AM33XX_INPUT_EN},
-	{NULL, 0},
-};
-/// Control pin mux For ARM and FPGA
-static struct pinmux_config gpio_spi_flash_pin_mux[] = {
-    {"mcasp0_aclkr.gpio3_18", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},//nConfig
-    {"mcasp0_fsr.gpio3_19",  OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},//nCE
-    {"mcasp0_axr1.gpio3_20",  OMAP_MUX_MODE7 | AM33XX_PIN_INPUT},//done
-	{NULL, 0},
-};
-
-static struct gpio_pin gpio_spi_flash[] = {
-	    {
-                .name                   = "done",
-                .gpio                   = GPIO_TO_PIN(3, 20),//GPIO_TO_PIN(1, 22),
-        },
-        {
-                .name                   = "conf",
-                .gpio                   = GPIO_TO_PIN(3, 18),//GPIO_TO_PIN(1, 23),
-        },
-		{
-                .name                   = "ce0",
-                .gpio                   = GPIO_TO_PIN(3, 19),//GPIO_TO_PIN(1, 21),
-        },
-};
-
-int	spi_flash_gpio_set_val(unsigned gpio,char val)
-{
-	 gpio_set_value(gpio, val);
-	 return 0;
-}
-
-int	spi_flash_gpio_get_val(unsigned gpio)
-{
-	return gpio_get_value(gpio);
-}
-
-int spi_flash_gpio_mod_set(struct gpio_flash_platform_data *gpio_data,int mod)
-{
-	int i;
-	//int status;
-
-	if(mod==GPIO_FLASH_SPI)
-	{
-		gpio_data->mode=GPIO_FLASH_SPI;
-
-		gpio_direction_output(gpio_spi_flash[2].gpio,1);
-		gpio_direction_output(gpio_spi_flash[1].gpio,1);
-		gpio_direction_input(gpio_spi_flash[0].gpio);
-	}
-	else{
-		gpio_data->mode=GPIO_FLASH_IO_INPUT;
-
-		for(i=0;i<3;i++)
-		{
-			gpio_direction_input(gpio_spi_flash[i].gpio);
-		}
-	}
-	return 0;
-}
-static struct gpio_flash_platform_data gpio_spi_flash_info = {
-		.type 			="w25q32",
-		.name			="flash_spi",
-        .gpios          = gpio_spi_flash,
-        .num_gpios      = ARRAY_SIZE(gpio_spi_flash),
-        .gpio_set_val 	= spi_flash_gpio_set_val,
-		.gpio_get_val	= spi_flash_gpio_get_val,
-		.gpio_mod_set	= spi_flash_gpio_mod_set,
-};
-
-static struct spi_board_info am335x_spi0_slave_info[] = {
-	{
-		.modalias      = "flash_spi",
-		.platform_data = &gpio_spi_flash_info,
-		//.controller_data = GPIO_TO_PIN(1, 21),
-		.irq           = -1,
-		.max_speed_hz  = 12000000,
-		.bus_num       = 1,
-		.chip_select   = 0,//cs0
-		.mode          = SPI_MODE_3,
-	},
-};
-
-
-
- void spi0_init(int evm_id, int profile)
-{
-	int err;
-	int status;
-
-	printk("--------spi0_init\n");
-	setup_pin_mux(spi0_pin_mux);
-	spi_register_board_info(am335x_spi0_slave_info,
-			ARRAY_SIZE(am335x_spi0_slave_info));
-
-	return;
-}
-
-
-void gpio_flash_init(int evm_id, int profile)
-{
-	int status;
-	printk("--------gpio_flash_init\n");
-
-	setup_pin_mux(gpio_spi_flash_pin_mux);
-	status= gpio_request_one(gpio_spi_flash[0].gpio,GPIOF_IN,gpio_spi_flash[0].name);
-	if (status < 0)
-		printk("Failed to request gpio for done");
-
-	status = gpio_request_one(gpio_spi_flash[1].gpio,GPIOF_IN,gpio_spi_flash[1].name);
-	if (status < 0)
-		printk("Failed to request gpio for conf");
-
-	status = gpio_request_one(gpio_spi_flash[2].gpio,GPIOF_IN,gpio_spi_flash[2].name);
-	if (status < 0)
-		printk("Failed to request gpio for ce1");
-
-	spi_flash_gpio_mod_set(&gpio_spi_flash_info,GPIO_FLASH_SPI);
-
-}
-
-/********************************************************/
-//GPIO SPI ARM <--> FPGA
-
-static struct pinmux_config gpio_spi_pin_mux[] = {
-	{"mii1_txd0.gpio0_28", 	OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT },	//clk
-	{"mii1_txclk.gpio3_9", 	OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT },	//D0
-	{"mii1_rxclk.gpio3_10", OMAP_MUX_MODE7 | AM33XX_PIN_OUTPUT},	//D1	
-	{"mii1_rxd0.gpio0_21", 	OMAP_MUX_MODE7 | AM33XX_PIN_INPUT },	//CS	 
-	{NULL, 0},
-};
-
-struct spi_gpio_platform_data gpio_spi_bus_data={
-	.sck			= GPIO_TO_PIN(0, 28),
-	.mosi			= GPIO_TO_PIN(3, 10),
-	.miso			= GPIO_TO_PIN(3, 9), 
-	.num_chipselect	= 1, 
-};
-
-
-static struct platform_device gpio_spi_bus = {
-        .name   = "spi_gpio",
-        .id     = 3,//bus_num
-        .dev    = {
-                .platform_data  = &gpio_spi_bus_data,//&gpio_spi_bus_info,
-        },
-};
-
-
-static struct spi_board_info gpio_spi_info[] = {	
-	{
-		.modalias      = "fpga_spi",
-		//.platform_data = &gpio_spi_flash_info,
-		.controller_data = GPIO_TO_PIN(0, 21),
-		.irq           = -1,
-		.max_speed_hz  = 12000000,
-		.bus_num       = 3,
-		.chip_select   = 0,//cs1
-	},
-};
-void gpio_spi_init(int evm_id, int profile)
-{
-	int err;
-	int status;
-	setup_pin_mux(gpio_spi_pin_mux);
-	spi_register_board_info(gpio_spi_info,
-			ARRAY_SIZE(gpio_spi_info));
-
-	err = platform_device_register(&gpio_spi_bus);
-	if (err)
-		printk("failed to register gpio spi device\n");
-	
-	return;
-}
-
-/********************************************************/
 static int beaglebone_phy_fixup(struct phy_device *phydev)
 {
 	phydev->supported &= ~(SUPPORTED_100baseT_Half |
@@ -1849,34 +1626,31 @@ static struct evm_dev_cfg low_cost_evm_dev_cfg[] = {
 
 /* General Purpose EVM */
 static struct evm_dev_cfg gen_purp_evm_dev_cfg[] = {
-//	{enable_ecap2,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
+	{enable_ecap2,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
 //	{enable_ehrpwm1, DEV_ON_BASEBOARD, PROFILE_0},
-//	{lcdc_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
-//	{tsc_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
-//	{rgmii1_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
-//	{rgmii2_init,	DEV_ON_DGHTR_BRD, (PROFILE_1 | PROFILE_2 | PROFILE_4 | PROFILE_6) },
-//	{usb0_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
- 	{usb1_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
- //       {uart1_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
- //       {uart2_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
+	{lcdc_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
+	{tsc_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1 | PROFILE_2 | PROFILE_7) },
+	{rgmii1_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
+	{rgmii2_init,	DEV_ON_DGHTR_BRD, (PROFILE_1 | PROFILE_2 | PROFILE_4 | PROFILE_6) },
+	{usb0_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
+	{usb1_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
+        {uart1_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
+        {uart2_init,    DEV_ON_BASEBOARD, PROFILE_ALL},
 	{evm_nand_init, DEV_ON_BASEBOARD, (PROFILE_ALL & ~PROFILE_2 & ~PROFILE_3)},
-	//{i2c1_init,	DEV_ON_DGHTR_BRD, (PROFILE_ALL & ~PROFILE_2)},
-//	{mcasp0_init,   DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_7) },
-//	{mcasp1_init,	DEV_ON_DGHTR_BRD, (PROFILE_0 | PROFILE_3 | PROFILE_7) },
+	{i2c1_init,	DEV_ON_DGHTR_BRD, (PROFILE_ALL & ~PROFILE_2)},
+	{mcasp0_init,   DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_7) },
+	{mcasp1_init,	DEV_ON_DGHTR_BRD, (PROFILE_0 | PROFILE_3 | PROFILE_7) },
 //	{mmc1_init,	DEV_ON_DGHTR_BRD, PROFILE_2},
-//	{mmc2_wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
-	//{mmc0_init,	DEV_ON_BASEBOARD, (PROFILE_ALL & ~PROFILE_5)},
-	{mmc0_init,	DEV_ON_BASEBOARD, (PROFILE_ALL)},
-//	{mmc0_no_cd_init,	DEV_ON_BASEBOARD, PROFILE_5},
-	{spi0_init,	DEV_ON_BASEBOARD, PROFILE_ALL},
-	{gpio_flash_init,DEV_ON_BASEBOARD, PROFILE_ALL},
-	{gpio_spi_init,DEV_ON_BASEBOARD, PROFILE_ALL},
-//	{uart3_wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
-//	{wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
-//	{d_can_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1)},
+	{mmc2_wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
+	{mmc0_init,	DEV_ON_BASEBOARD, (PROFILE_ALL & ~PROFILE_5)},
+	{mmc0_no_cd_init,	DEV_ON_BASEBOARD, PROFILE_5},
+	{spi0_init,	DEV_ON_DGHTR_BRD, PROFILE_2},
+	{uart3_wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
+	{wl12xx_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_3 | PROFILE_5)},
+	{d_can_init,	DEV_ON_BASEBOARD, (PROFILE_0 | PROFILE_1)},
 //	{matrix_keypad_init, DEV_ON_DGHTR_BRD, PROFILE_0},
-//	{gpio_led_init, DEV_ON_BASEBOARD, PROFILE_ALL},
-//	{gpio_keys_init, DEV_ON_BASEBOARD, PROFILE_0},
+	{gpio_led_init, DEV_ON_BASEBOARD, PROFILE_0},
+	{gpio_keys_init, DEV_ON_BASEBOARD, PROFILE_0},
 	{NULL, 0, 0},
 };
 
@@ -2143,16 +1917,7 @@ static struct omap_musb_board_data musb_board_data = {
 	 * mode[4:7] = USB1PORT's mode
 	 * AM335X beta EVM has USB0 in OTG mode and USB1 in host mode.
 	 */
-
-	//.mode           = MUSB_OTG,
-	.mode           =(MUSB_PERIPHERAL<<4)|MUSB_OTG,
-	//.mode           =(MUSB_PERIPHERAL<<4)|MUSB_PERIPHERAL,
-	//.mode =MUSB_PERIPHERAL,
-	//.mode =MUSB_PERIPHERAL<<4,//hosthost
-	//.mode =MUSB_PERIPHERAL<<4|MUSB_PERIPHERAL,//hosthost
-	//.mode           =(MUSB_PERIPHERAL<<4)|MUSB_OTG,
-	//.mode           =(MUSB_OTG<<4)|MUSB_OTG,
-	//.mode           =(MUSB_HOST<<4)|MUSB_OTG,
+	.mode           = (MUSB_PERIPHERAL << 4) | MUSB_OTG,
 	.power		= 500,
 	.instances	= 1,
 };
@@ -2161,7 +1926,7 @@ static struct omap_musb_board_data musb_board_data = {
 static int cpld_reg_probe(struct i2c_client *client,
 	    const struct i2c_device_id *id)
 {
-	cpld_client = client;
+	cpld_client = client;
 	return 0;
 }
 
