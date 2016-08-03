@@ -39,3 +39,16 @@ modify Kconfig :config SPI_W25Q32
 make menuconfig
    User mode SPI device driver support   
    w25q32bv SPI flash driver
+
+7 修正spi
+Solving the SPI problem
+modify "spidev" to "fpga_spi" in the drivers/spi/spidev.c
+add the drivers/spi/spi-w25q32.h
+replace drivers/spi/spi-w25q32.c 
+make menuconfig(GPIO-based bitbanging SPI Master,User mode SPI device driver support)
+
+
+
+
+
+
