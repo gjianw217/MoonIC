@@ -21,6 +21,10 @@
 #define _CPPI41_DMA_H_
 #include <plat/usb.h>
 
+/* USBSS RTL versions */
+#define USBSS_RTL_VERSION_MASK	0xF
+#define USBSS_RTL_VERSION_D	0xD
+
 /**
  * struct usb_cppi41_info - CPPI 4.1 USB implementation details
  * @dma_block:	DMA block number
@@ -40,6 +44,8 @@ struct usb_cppi41_info {
 	u16 *tx_comp_q;
 	u16 *rx_comp_q;
 	u8 bd_intr_ctrl;
+	u8 grndis_for_host_rx;
+	u32 version;
 };
 
 extern struct usb_cppi41_info usb_cppi41_info[];
@@ -52,4 +58,11 @@ extern struct usb_cppi41_info usb_cppi41_info[];
  */
 void cppi41_completion(struct musb *musb, u32 rx, u32 tx);
 
+/**
+ * cppi41_handle_txfifo_intr - Handles tx fifo empty interupts
+ * @musb:	the controller
+ */
+void cppi41_handle_txfifo_intr(struct musb *musb, u16 usbintr);
+void txfifoempty_int_enable(struct musb *musb, u8 ep_num);
+void txfifoempty_int_disable(struct musb *musb, u8 ep_num);
 #endif	/* _CPPI41_DMA_H_ */

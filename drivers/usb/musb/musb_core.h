@@ -229,6 +229,8 @@ struct musb_platform_ops {
 		void __iomem *);
 	void (*dma_controller_destroy)(struct dma_controller *);
 	int (*simulate_babble_intr)(struct musb *musb);
+	void (*txfifoempty_intr_enable)(struct musb *musb, u8 ep_num);
+	void (*txfifoempty_intr_disable)(struct musb *musb, u8 ep_num);
 };
 
 /*
@@ -277,6 +279,9 @@ struct musb_hw_ep {
 	/* peripheral side */
 	struct musb_ep		ep_in;			/* TX */
 	struct musb_ep		ep_out;			/* RX */
+
+	u8			prev_toggle;		/* Rx */
+	u8			xfer_type;
 };
 
 static inline struct musb_request *next_in_request(struct musb_hw_ep *hw_ep)
@@ -463,10 +468,13 @@ struct musb {
 	int			first;
 	int			old_state;
 	struct	timer_list	otg_timer;
+	u8			en_otg_timer;
+	u8			en_otgw_timer;
 #ifndef CONFIG_MUSB_PIO_ONLY
 	u64			*orig_dma_mask;
 #endif
 	short			fifo_mode;
+	u8			txfifo_intr_enable;
 };
 
 static inline struct musb *gadget_to_musb(struct usb_gadget *g)
@@ -560,6 +568,18 @@ extern void musb_hnp_stop(struct musb *musb);
 extern void musb_restore_context(struct musb *musb);
 extern void musb_save_context(struct musb *musb);
 
+static inline void txfifoempty_int_enable(struct musb *musb, u8 ep_num)
+{
+	if (musb->ops->txfifoempty_intr_enable)
+		musb->ops->txfifoempty_intr_enable(musb, ep_num);
+}
+
+static inline void txfifoempty_int_disable(struct musb *musb, u8 ep_num)
+{
+	if (musb->ops->txfifoempty_intr_disable)
+		musb->ops->txfifoempty_intr_disable(musb, ep_num);
+}
+
 static inline void musb_platform_set_vbus(struct musb *musb, int is_on)
 {
 	if (musb->ops->set_vbus)
@@ -650,6 +670,7 @@ static inline const char *get_dma_name(struct musb *musb)
 		return "?dma?";
 #endif
 }
+extern int ep_config_from_table(struct musb *musb);
 
 extern void musb_gb_work(struct work_struct *data);
 /*-------------------------- ProcFS definitions ---------------------*/
@@ -658,4 +679,6 @@ struct proc_dir_entry;
 
 extern struct proc_dir_entry *musb_debug_create(char *name, struct musb *data);
 extern void musb_debug_delete(char *name, struct musb *data);
+extern void musb_save_context(struct musb *musb);
+extern void musb_restore_context(struct musb *musb);
 #endif	/* __MUSB_CORE_H__ */

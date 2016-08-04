@@ -99,6 +99,10 @@ struct cppi41_channel {
 	u8  zlp_queued;
 	u8  inf_mode;
 	u8  tx_complete;
+	u8  hb_mult;
+	u8  txf_complete;
+	u8  txfifo_intr_enable;
+	u8  count;
 };
 
 /**
@@ -130,6 +134,7 @@ struct cppi41 {
 	u32 teardown_reg_offs;		/* USB_TEARDOWN_REG offset */
 	u32 bd_size;
 	u8  inf_mode;
+	u8  txfifo_intr_enable;		/* txfifo empty interrupt logic */
 };
 
 struct usb_cppi41_info usb_cppi41_info[2];
@@ -571,6 +576,9 @@ static unsigned cppi41_next_tx_segment(struct cppi41_channel *tx_ch)
 	u16 q_mgr = cppi_info->q_mgr;
 	u16 tx_comp_q = cppi_info->tx_comp_q[tx_ch->ch_num];
 	u8 en_bd_intr = cppi->en_bd_intr;
+	u8 is_isoc = 0;
+	struct musb_hw_ep *hw_ep = cppi->musb->endpoints + tx_ch->end_pt->epnum;
+	int xfer_type = hw_ep->xfer_type;
 
 	/*
 	 * Tx can use the generic RNDIS mode where we can probably fit this
@@ -596,6 +604,12 @@ static unsigned cppi41_next_tx_segment(struct cppi41_channel *tx_ch)
 	dev_dbg(musb->controller, "TX DMA%u, %s, maxpkt %u, %u PDs, addr %#x, len %u\n",
 	    tx_ch->ch_num, tx_ch->dma_mode ? "accelerated" : "transparent",
 	    pkt_size, num_pds, tx_ch->start_addr + tx_ch->curr_offset, length);
+
+	if (xfer_type  == USB_ENDPOINT_XFER_ISOC)
+		is_isoc = 1;
+
+	if (is_isoc && cppi->txfifo_intr_enable && (length <= tx_ch->pkt_size))
+		tx_ch->txfifo_intr_enable = 1;
 
 	for (n = 0; n < num_pds; n++) {
 		struct cppi41_host_pkt_desc *hw_desc;
@@ -637,6 +651,17 @@ static unsigned cppi41_next_tx_segment(struct cppi41_channel *tx_ch)
 
 		dev_dbg(musb->controller, "TX PD %p: buf %08x, len %08x, pkt info %08x\n", curr_pd,
 		    hw_desc->buf_ptr, hw_desc->buf_len, hw_desc->pkt_info);
+
+		/* make sure descriptor details are updated to memory*/
+		dsb();
+
+		/* enable tx fifo empty interrupt */
+		if (tx_ch->txfifo_intr_enable) {
+			dev_dbg(musb->controller, "txs(%p %d) enable txFintr\n",
+				curr_pd, hw_desc->orig_buf_len &
+					~CPPI41_PKT_INTR_FLAG);
+			txfifoempty_int_enable(cppi->musb, curr_pd->ep_num);
+		}
 
 		cppi41_queue_push(&tx_ch->queue_obj, curr_pd->dma_addr,
 				  USB_CPPI41_DESC_ALIGN, pkt_size);
@@ -763,7 +788,8 @@ static unsigned cppi41_next_rx_segment(struct cppi41_channel *rx_ch)
 
 		pkt_len = rx_ch->pkt_size;
 		mode = USB_GENERIC_RNDIS_MODE;
-		if (!strcmp(gadget_driver->driver.name, "g_file_storage")) {
+		if (!strcmp(gadget_driver->driver.name, "g_file_storage") ||
+			!strcmp(gadget_driver->driver.name, "g_mass_storage")) {
 			if (cppi->inf_mode && length > pkt_len) {
 				pkt_len = 0;
 				length = length - rx_ch->pkt_size;
@@ -787,16 +813,19 @@ static unsigned cppi41_next_rx_segment(struct cppi41_channel *rx_ch)
 		 * probably fit this transfer in one PD and one IRQ
 		 * (or two with a short packet).
 		 */
-		if ((pkt_size & 0x3f) == 0) {
+		if (cppi->cppi_info->grndis_for_host_rx &&
+					(pkt_size & 0x3f) == 0) {
 			cppi41_mode_update(rx_ch, USB_GENERIC_RNDIS_MODE);
 			cppi41_autoreq_update(rx_ch, USB_AUTOREQ_ALL_BUT_EOP);
 
 			pkt_size = (length > 0x10000) ? 0x10000 : length;
 			cppi41_set_ep_size(rx_ch, pkt_size);
+			mode = USB_GENERIC_RNDIS_MODE;
 		} else {
 			cppi41_mode_update(rx_ch, USB_TRANSPARENT_MODE);
 			cppi41_autoreq_update(rx_ch, USB_NO_AUTOREQ);
-			max_rx_transfer_size = rx_ch->pkt_size;
+			max_rx_transfer_size = rx_ch->hb_mult * rx_ch->pkt_size;
+			mode = USB_TRANSPARENT_MODE;
 		}
 	}
 
@@ -806,7 +835,10 @@ static unsigned cppi41_next_rx_segment(struct cppi41_channel *rx_ch)
 	    rx_ch->curr_offset, rx_ch->length);
 
 	/* calculate number of bd required */
-	n_bd = (length + max_rx_transfer_size - 1)/max_rx_transfer_size;
+	if (is_host_active(cppi->musb) && (mode == USB_TRANSPARENT_MODE))
+		n_bd = 1;
+	else
+		n_bd = (length + max_rx_transfer_size - 1)/max_rx_transfer_size;
 
 	for (i = 0; i < n_bd ; ++i) {
 		/* Get Rx packet descriptor from the free pool */
@@ -839,6 +871,10 @@ static unsigned cppi41_next_rx_segment(struct cppi41_channel *rx_ch)
 
 		if (en_bd_intr)
 			hw_desc->orig_buf_len |= CPPI41_PKT_INTR_FLAG;
+
+		/* make sure descriptor details are updated to memory*/
+		dsb();
+
 		/*
 		 * Push the free Rx packet descriptor
 		 * to the free descriptor/buffer queue.
@@ -855,7 +891,24 @@ sched:
 	if (is_host_active(cppi->musb) && rx_ch->channel.actual_len) {
 		void __iomem *epio = rx_ch->end_pt->regs;
 		u16 csr = musb_readw(epio, MUSB_RXCSR);
+		u8 curr_toggle = (csr & MUSB_RXCSR_H_DATATOGGLE) ? 1 : 0;
 
+		/* check if data toggle bit got out of sync */
+		if (curr_toggle == rx_ch->end_pt->prev_toggle) {
+			dev_dbg(musb->controller,
+				"Data toggle same as previous (=%d) on ep%d\n",
+					curr_toggle, rx_ch->end_pt->epnum);
+
+			csr |= MUSB_RXCSR_H_DATATOGGLE |
+					MUSB_RXCSR_H_WR_DATATOGGLE;
+			musb_writew(epio, MUSB_RXCSR, csr);
+
+			rx_ch->end_pt->prev_toggle = !curr_toggle;
+		} else {
+			rx_ch->end_pt->prev_toggle = curr_toggle;
+		}
+
+		csr = musb_readw(epio, MUSB_RXCSR);
 		csr |= MUSB_RXCSR_H_REQPKT | MUSB_RXCSR_H_WZC_BITS;
 		musb_writew(epio, MUSB_RXCSR, csr);
 	}
@@ -913,7 +966,8 @@ static int cppi41_channel_program(struct dma_channel *channel,	u16 maxpacket,
 	/* Set the transfer parameters, then queue up the first segment */
 	cppi_ch->start_addr = dma_addr;
 	cppi_ch->curr_offset = 0;
-	cppi_ch->pkt_size = maxpacket;
+	cppi_ch->hb_mult = (maxpacket >> 11) & 0x03;
+	cppi_ch->pkt_size = maxpacket & 0x7ff;
 	cppi_ch->length = length;
 	cppi_ch->transfer_mode = mode;
 	cppi_ch->zlp_queued = 0;
@@ -1145,7 +1199,7 @@ static int cppi41_channel_abort(struct dma_channel *channel)
 	void __iomem *reg_base, *epio;
 	unsigned long pd_addr;
 	u32 csr, td_reg;
-	u8 ch_num, ep_num;
+	u8 ch_num, ep_num, i;
 
 	cppi_ch = container_of(channel, struct cppi41_channel, channel);
 	ch_num = cppi_ch->ch_num;
@@ -1181,6 +1235,13 @@ static int cppi41_channel_abort(struct dma_channel *channel)
 	if (cppi_ch->transmit) {
 		dprintk("Tx channel teardown, cppi_ch = %p\n", cppi_ch);
 
+		/* disable the DMAreq before teardown */
+		csr  = musb_readw(epio, MUSB_TXCSR);
+		csr &= ~MUSB_TXCSR_DMAENAB;
+		musb_writew(epio, MUSB_TXCSR, csr);
+
+		cppi_ch->tx_complete = 0;
+		cppi_ch->txf_complete = 0;
 		/* Tear down Tx DMA channel */
 		usb_tx_ch_teardown(cppi_ch);
 
@@ -1190,19 +1251,41 @@ static int cppi41_channel_abort(struct dma_channel *channel)
 		musb_writel(reg_base, cppi->teardown_reg_offs, td_reg);
 
 		/* Flush FIFO of the endpoint */
-		csr  = musb_readw(epio, MUSB_TXCSR);
-		csr |= MUSB_TXCSR_FLUSHFIFO | MUSB_TXCSR_H_WZC_BITS;
-		musb_writew(epio, MUSB_TXCSR, csr);
-		musb_writew(epio, MUSB_TXCSR, csr);
-		cppi_ch->tx_complete = 0;
+		for (i = 0; i < 2; ++i) {
+			csr  = musb_readw(epio, MUSB_TXCSR);
+			if (csr & MUSB_TXCSR_TXPKTRDY) {
+				csr |= MUSB_TXCSR_FLUSHFIFO |
+					MUSB_TXCSR_H_WZC_BITS;
+				musb_writew(epio, MUSB_TXCSR, csr);
+			}
+		}
 	} else { /* Rx */
 		dprintk("Rx channel teardown, cppi_ch = %p\n", cppi_ch);
 
+		/* disable the DMAreq and remove reqpkt */
+		csr  = musb_readw(epio, MUSB_RXCSR);
+		dev_dbg(musb->controller,
+			"before rx-teardown: rxcsr %x rxcount %x\n", csr,
+			musb_readw(epio, MUSB_RXCOUNT));
+
+		/* For host, clear (just) ReqPkt at end of current packet(s) */
+		if (is_host_active(cppi->musb))
+			csr &= ~MUSB_RXCSR_H_REQPKT;
+
+		csr &= ~MUSB_RXCSR_DMAENAB;
+		musb_writew(epio, MUSB_RXCSR, csr);
+
+
 		/* Flush FIFO of the endpoint */
 		csr  = musb_readw(epio, MUSB_RXCSR);
-		csr |= MUSB_RXCSR_FLUSHFIFO | MUSB_RXCSR_H_WZC_BITS;
+
+		if (csr & MUSB_RXCSR_RXPKTRDY)
+			csr |= MUSB_RXCSR_FLUSHFIFO;
+
+		csr |= MUSB_RXCSR_H_WZC_BITS;
 		musb_writew(epio, MUSB_RXCSR, csr);
 		musb_writew(epio, MUSB_RXCSR, csr);
+		csr  = musb_readw(epio, MUSB_RXCSR);
 
 		/* Issue CPPI FIFO teardown for Rx channel */
 		td_reg  = musb_readl(reg_base, cppi->teardown_reg_offs);
@@ -1221,22 +1304,6 @@ static int cppi41_channel_abort(struct dma_channel *channel)
 
 		/* For host, ensure ReqPkt is never set again */
 		cppi41_autoreq_update(cppi_ch, USB_NO_AUTOREQ);
-
-		/* For host, clear (just) ReqPkt at end of current packet(s) */
-		if (is_host_active(cppi->musb))
-			csr &= ~MUSB_RXCSR_H_REQPKT;
-		csr |= MUSB_RXCSR_H_WZC_BITS;
-
-		/* Clear DMA enable */
-		csr &= ~MUSB_RXCSR_DMAENAB;
-		musb_writew(epio, MUSB_RXCSR, csr);
-
-		/* Flush the FIFO of endpoint once again */
-		csr  = musb_readw(epio, MUSB_RXCSR);
-		csr |= MUSB_RXCSR_FLUSHFIFO | MUSB_RXCSR_H_WZC_BITS;
-		musb_writew(epio, MUSB_RXCSR, csr);
-
-		udelay(50);
 	}
 
 	/*
@@ -1298,24 +1365,33 @@ void txdma_completion_work(struct work_struct *data)
 				 */
 				if (!tx_ch->end_pt) {
 					tx_ch->tx_complete = 0;
+					tx_ch->count = 0;
 					continue;
 				}
 
 				epio = tx_ch->end_pt->regs;
 				csr = musb_readw(epio, MUSB_TXCSR);
 
-				if (csr & (MUSB_TXCSR_TXPKTRDY |
-					MUSB_TXCSR_FIFONOTEMPTY)) {
+				if (!tx_ch->txfifo_intr_enable &&
+					(csr & (MUSB_TXCSR_TXPKTRDY |
+					MUSB_TXCSR_FIFONOTEMPTY))) {
 					resched = 1;
 				} else {
+					if (tx_ch->count > 0) {
+						tx_ch->count--;
+						resched = 1;
+						continue;
+					}
 					tx_ch->channel.status =
 							MUSB_DMA_STATUS_FREE;
 					tx_ch->tx_complete = 0;
+					spin_lock_irqsave(&musb->lock, flags);
 					musb_dma_completion(musb, index+1, 1);
+					spin_unlock_irqrestore(&musb->lock,
+							flags);
 				}
 			}
 		}
-		spin_unlock_irqrestore(&musb->lock, flags);
 
 		if (resched) {
 			resched = 0;
@@ -1326,6 +1402,38 @@ void txdma_completion_work(struct work_struct *data)
 	}
 
 }
+
+void cppi41_handle_txfifo_intr(struct musb *musb, u16 usbintr)
+{
+	struct cppi41 *cppi;
+	struct cppi41_channel *tx_ch;
+	int index;
+
+	cppi = container_of(musb->dma_controller, struct cppi41, controller);
+	for (index = 0; (index < USB_CPPI41_NUM_CH) && usbintr; index++) {
+		if (usbintr & 1) {
+			tx_ch = &cppi->tx_cppi_ch[index];
+			if (tx_ch->txf_complete) {
+				/* disable txfifo empty interupt */
+				txfifoempty_int_disable(musb, index+1);
+				tx_ch->txf_complete = 0;
+				if (!tx_ch->txfifo_intr_enable)
+					dev_dbg(musb->controller,
+					"Bug, wrong TxFintr ep%d\n", index+1);
+				tx_ch->txfifo_intr_enable = 0;
+
+				tx_ch->channel.status =
+					MUSB_DMA_STATUS_FREE;
+
+				dev_dbg(musb->controller,
+					"txc: givback ep%d\n", index+1);
+				musb_dma_completion(musb, index+1, 1);
+			}
+		}
+		usbintr = usbintr >> 1;
+	}
+}
+EXPORT_SYMBOL(cppi41_handle_txfifo_intr);
 
 /**
  * cppi41_dma_controller_create -
@@ -1350,7 +1458,22 @@ cppi41_dma_controller_create(struct musb  *musb, void __iomem *mregs)
 	cppi->controller.channel_abort = cppi41_channel_abort;
 	cppi->cppi_info = (struct usb_cppi41_info *)&usb_cppi41_info[musb->id];;
 	cppi->en_bd_intr = cppi->cppi_info->bd_intr_ctrl;
+	cppi->txfifo_intr_enable = musb->txfifo_intr_enable;
 	INIT_WORK(&cppi->txdma_work, txdma_completion_work);
+
+	/*
+	 * Extra IN token has been seen when a file is transferred from one MSC
+	 * device to other due to xDMA IP bug when multiple masters access
+	 * mentor controller register space.
+	 * As a software workaround use transparent mode and correct data toggle
+	 * when they go wrong.
+	 * This issue is expected to be fixed in RTL version post 0xD.
+	 */
+	if ((cppi->cppi_info->version & USBSS_RTL_VERSION_MASK) >
+			USBSS_RTL_VERSION_D)
+		cppi->cppi_info->grndis_for_host_rx = 1;
+	else
+		cppi->cppi_info->grndis_for_host_rx = 0;
 
 	/* enable infinite mode only for ti81xx silicon rev2 */
 	if (cpu_is_am33xx() || cpu_is_ti816x()) {
@@ -1422,6 +1545,9 @@ static void usb_process_tx_queue(struct cppi41 *cppi, unsigned index)
 		    (tx_ch->transfer_mode && !tx_ch->zlp_queued))
 			cppi41_next_tx_segment(tx_ch);
 		else if (tx_ch->channel.actual_len >= tx_ch->length) {
+			void __iomem *epio;
+			u16 csr;
+
 			/*
 			 * We get Tx DMA completion interrupt even when
 			 * data is still in FIFO and not moved out to
@@ -1430,8 +1556,34 @@ static void usb_process_tx_queue(struct cppi41 *cppi, unsigned index)
 			 * USB functionality. So far, we have obsered
 			 * failure with iperf.
 			 */
-			tx_ch->tx_complete = 1;
-			schedule_work(&cppi->txdma_work);
+			/* wait for tx fifo empty completion interrupt
+			 * if enabled other wise use the workthread
+			 * to poll fifo empty status
+			 */
+			epio = tx_ch->end_pt->regs;
+			csr = musb_readw(epio, MUSB_TXCSR);
+
+			if (tx_ch->txfifo_intr_enable) {
+				tx_ch->txf_complete = 1;
+				dev_dbg(musb->controller,
+				"wait for TxF-EmptyIntr ep%d\n", ep_num);
+			} else {
+				int residue;
+
+				residue = tx_ch->channel.actual_len %
+						tx_ch->pkt_size;
+
+				if (tx_ch->pkt_size > 128 && !residue) {
+					tx_ch->channel.status =
+						MUSB_DMA_STATUS_FREE;
+					musb_dma_completion(cppi->musb,
+						ep_num, 1);
+				} else {
+					tx_ch->tx_complete = 1;
+					tx_ch->count = 1;
+					schedule_work(&cppi->txdma_work);
+				}
+			}
 		}
 	}
 }
@@ -1505,6 +1657,11 @@ static void usb_process_rx_queue(struct cppi41 *cppi, unsigned index)
 		if (en_bd_intr)
 			orig_buf_len &= ~CPPI41_PKT_INTR_FLAG;
 
+		dev_dbg(musb->controller,
+			"curr_pd=%p, len=%d, origlen=%d,rxch(alen/len)=%d/%d\n",
+				curr_pd, length, orig_buf_len,
+				rx_ch->channel.actual_len, rx_ch->length);
+
 		if (unlikely(rx_ch->channel.actual_len >= rx_ch->length ||
 			     length < orig_buf_len)) {
 
@@ -1544,8 +1701,9 @@ static void usb_process_rx_queue(struct cppi41 *cppi, unsigned index)
 				musb_dma_completion(cppi->musb, ep_num, 0);
 			}
 		} else {
-			if (is_peripheral_active(cppi->musb) &&
-				((rx_ch->length - rx_ch->curr_offset) > 0))
+			if ((is_peripheral_active(cppi->musb) ||
+				!cppi->cppi_info->grndis_for_host_rx) &&
+				(rx_ch->length - rx_ch->curr_offset) > 0)
 				cppi41_next_rx_segment(rx_ch);
 		}
 	}

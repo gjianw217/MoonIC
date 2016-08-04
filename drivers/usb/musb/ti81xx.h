@@ -83,6 +83,7 @@
 
 #define USB_GRNDIS_EPSIZE_OFFS	0X0080
 #define USB_SRP_FIX_TIME_REG    0x00d4
+#define USB_TH_XDMA_IDLE_REG    0x00dc
 #define USB_PHY_UTMI_REG	0x00e0
 #define USB_PHY_UTMI_LB_REG	0x00e4
 #define USB_MODE_REG		0x00e8
@@ -124,6 +125,9 @@
 /* USB interrupt register bits */
 #define USB_INTR_USB_SHIFT      0
 #define USB_INTR_USB_MASK       (0x1ff << USB_INTR_USB_SHIFT) /* 8 Mentor */
+#define USB_INTR_TXFIFO_MASK     (0xffff << 16)
+#define USB_INTR_TXFIFO_EMPTY	17
+
 				/* interrupts and DRVVBUS interrupt */
 #define USB_INTR_DRVVBUS        0x100
 #define USB_INTR_RX_SHIFT       16
